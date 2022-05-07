@@ -1,0 +1,43 @@
+name: k8s worker
+on:
+  push:
+  schedule:
+    - cron: "0 */6 * * *"
+    - cron: "0 */12 * * *"
+    - cron: "0 */24 * * *"
+jobs:
+  node:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-18.04
+          - ubuntu-18.04
+          - ubuntu-18.04
+          - ubuntu-18.04
+          - ubuntu-18.04
+    steps:
+    - run: |
+        sleep $((1 + $RANDOM % 10))
+    - name: Get hostname
+      id: hostname
+      run: |
+        echo '::set-output name=hostname::$(cat /etc/hostname)'
+    - name: Install k3d
+      run: |
+        sudo apt update
+        sudo apt install wireguard wireguard-tools -y
+        wget -qO- https://get.k3s.io | sh -s - agent --server https://${{ secrets.K3S_SERVER }}:${{ secrets.K3S_SERVER_PORT }} \
+                                                     --token ${{ secrets.K3S_TOKEN }} \
+                                                     --kube-proxy-arg "proxy-mode=ipvs" "masquerade-all=true" \
+                                                     --kube-proxy-arg "metrics-bind-address=0.0.0.0"
+    - name: Sleep
+      run: |
+        journalctl -f -u k3s-agent
+    - name: Quit
+      uses: steebchen/kubectl@master
+      if: always()
+      env:
+        KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
+      with:
+        args: 'delete node ${{ steps.hostname.outputs.hostname }}'
