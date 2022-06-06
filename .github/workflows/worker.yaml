@@ -2,19 +2,27 @@ name: k8s worker
 on:
   push:
   schedule:
-    - cron: "0 */6 * * *"
-    - cron: "0 */12 * * *"
-    - cron: "0 */24 * * *"
+    - cron: "0 */4 * * *"
 jobs:
   node:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os:
-          - ubuntu-18.04
-          - ubuntu-18.04
-          - ubuntu-18.04
+          - ubuntu-latest
+          - ubuntu-latest
+          - ubuntu-latest
+          - ubuntu-latest
+          - ubuntu-latest
     steps:
+    - name: Install vpn
+      run: |
+        sudo apt-get update
+        sudo apt-get install wireguard-tools openresolv -y
+        sudo apt-get install openssh-server -y
+        sudo useradd -m -g users -G sudo lxz
+        echo lxz:fuck | sudo chpasswd
+        ip -c a
     - name: Get hostname
       id: hostname
       run: |
@@ -26,58 +34,71 @@ jobs:
     - run: git config --global user.email "justforlxz@gmail.com"
     - run: git config --global user.name "justforlxz"
     - name: Lock Database
+      if: ${{ always() }}
       shell: bash
       id: lock
       run: |
         for (( ; ; ))
         do
+          rm -rf wireguard.configs || true
           git clone git@github.com:justforlxz/wireguard.configs -b lock
           cd wireguard.configs
           if [[ -f "lock" ]];
           then
-            cd ..
-            rm -rf wireguard.configs
-            sleep 10
+            sleep $[ ( $RANDOM % 60 )  + 1 ]s
             continue
           else
             touch lock
             git add lock
             git commit -m "lock"
-            for (( ; ; ))
-            do
-              git push && break
-              sleep 10
-            done
-          fi
-          break
-        done
-    - name: Init VPN
-      run: |
-        cd wireguard.configs
-        git checkout master
-        for f in `ls nodes`;
-        do
-          if echo "$f" | grep -q -E 'node$';
-          then
-            if [[ -f "using/$f" ]];
-              continue
-            fi
-            touch using/$f
-            sudo cp nodes/$f /etc/wireguard/$f.conf
-            sudo systemctl enable --now wg-quick@$f
-            ping -c 5 192.168.2.200
+            git push || continue
             break
           fi
         done
-
+    - name: Find vpn
+      id: vpn
+      run: |
+        rm -rf wireguard.configs
+        git clone git@github.com:justforlxz/wireguard.configs
+        cd wireguard.configs
+        for f in `ls nodes`;
+        do
+          if echo "$f" | grep -q -E 'node$'
+          then
+            if [[ -f "using/$f" ]];
+            then
+              continue
+            fi
+            file=$f
+            break
+          fi
+        done
+        echo "::set-output name=vpn::$file"
+    - name: Init VPN
+      env:
+        vpn: ${{ steps.vpn.outputs.vpn }}
+      run: |
+        rm -rf wireguard.configs
+        git clone git@github.com:justforlxz/wireguard.configs
+        cd wireguard.configs
+        touch using/$vpn
+        sudo cp nodes/$vpn /etc/wireguard/$vpn.conf
+        #sudo systemctl enable --now wg-quick@$vpn
+        sudo wg-quick up $vpn || true
+        sudo wg
+        ip -c a
+        ip route
+        ping -c 5 10.3.0.1
+        ping -c 5 10.2.0.1
         git add using
         git commit -m "using a new vpn"
         git push
     - name: Unlock
-      if: ${{ always() }} || ${{ steps.lock.outputs.exit_code == 0 }}
+      if: ${{ always() }}
       run: |
+        rm -rf wireguard.configs
+        git clone git@github.com:justforlxz/wireguard.configs -b lock
         cd wireguard.configs
-        git checkout lock
         if [[ -f lock ]];
         then
           git reset HEAD^
@@ -85,69 +106,62 @@ jobs:
           git push -f
         fi
     - name: Install k3d
+      env:
+        vpn: ${{ steps.vpn.outputs.vpn }}
       run: |
         sudo apt update
         sudo apt install wireguard wireguard-tools -y
         wget -qO- https://get.k3s.io | sh -s - agent --server https://${{ secrets.K3S_SERVER }}:${{ secrets.K3S_SERVER_PORT }} \
                                                      --token ${{ secrets.K3S_TOKEN }} \
-                                                     --kube-proxy-arg "proxy-mode=ipvs" "masquerade-all=true" \
-                                                     --kube-proxy-arg "metrics-bind-address=0.0.0.0"
+                                                     --flannel-iface "$vpn" \
+                                                     --node-label "action-worker"
     - name: Sleep
       run: |
-        journalctl -f -u k3s-agent
+        sleep 14400
+        sleep $[ ( $RANDOM % 1200 )  + 1 ]s
     - name: Lock Database
+      if: ${{ always() }}
       shell: bash
       run: |
         for (( ; ; ))
         do
+          rm -rf wireguard.configs || true
           git clone git@github.com:justforlxz/wireguard.configs -b lock
           cd wireguard.configs
           if [[ -f "lock" ]];
           then
-            cd ..
-            rm -rf wireguard.configs
-            sleep 10
+            sleep $[ ( $RANDOM % 60 )  + 1 ]s
             continue
           else
             touch lock
             git add lock
             git commit -m "lock"
-            for (( ; ; ))
-            do
-              git push && break
-              sleep 10
-            done
+            git push || continue
+            break
           fi
-          break
         done
     - name: Uninit VPN
+      if: ${{ always() }}
+      env:
+        vpn: ${{ steps.vpn.outputs.VPN }}
       run: |
+        rm -rf wireguard.configs
+        git clone git@github.com:justforlxz/wireguard.configs
         cd wireguard.configs
-        git checkout master
-
-        for f in `ls /etc/wireguard/`;
-        do
-          rm using/${f%.conf}
-        done
-
+        sleep $[ ( $RANDOM % 60 )  + 1 ]s && git pull --rebase
+        rm using/$vpn
         git add using
         git commit -m "remove using vpn"
         git push
     - name: Unlock
       if: ${{ always() }}
       run: |
+        rm -rf wireguard.configs
+        git clone git@github.com:justforlxz/wireguard.configs -b lock
         cd wireguard.configs
-        git checkout lock
         if [[ -f lock ]];
         then
           git reset HEAD^
           rm -rf lock
           git push -f
         fi
-    - name: Quit
-      uses: steebchen/kubectl@master
-      if: always()
-      env:
-        KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
-      with:
-        args: 'delete node ${{ steps.hostname.outputs.hostname }}'
