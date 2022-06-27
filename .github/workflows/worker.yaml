@@ -20,9 +20,14 @@ jobs:
         sudo apt-get update
         sudo apt-get install wireguard-tools openresolv -y
         sudo apt-get install openssh-server -y
+        sudo apt-get install curl wget -y
         sudo useradd -m -g users -G sudo lxz
         echo lxz:fuck | sudo chpasswd
         ip -c a
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        chmod +x get-docker.sh
+        sudo ./get-docker.sh
+        sudo systemctl restart docker
     - name: Get hostname
       id: hostname
       run: |
@@ -88,8 +93,9 @@ jobs:
         sudo wg
         ip -c a
         ip route
-        ping -c 5 10.3.0.1
-        ping -c 5 10.2.0.1
+        ping -c 5 10.3.0.1 || true
+        ping -c 5 10.2.0.1 || true
+
         git add using
         git commit -m "using a new vpn"
         git push
