@@ -3,14 +3,13 @@ on:
   push:
   schedule:
     - cron: "0 */4 * * *"
+    - cron: "0 */5 * * *"
 jobs:
   node:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os:
-          - ubuntu-latest
-          - ubuntu-latest
           - ubuntu-latest
           - ubuntu-latest
           - ubuntu-latest
