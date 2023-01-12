@@ -88,12 +88,10 @@ jobs:
         cd wireguard.configs
         touch using/$vpn
         sudo cp nodes/$vpn /etc/wireguard/$vpn.conf
-        #sudo systemctl enable --now wg-quick@$vpn
         sudo wg-quick up $vpn || true
         sudo wg
         ip -c a
         ip route
-        ping -c 5 10.3.0.1 || true
         ping -c 5 10.2.0.1 || true
 
         git add using
@@ -117,7 +115,7 @@ jobs:
       run: |
         sudo apt update
         sudo apt install wireguard wireguard-tools -y
-        wget -qO- https://get.k3s.io | sh -s - agent --server https://${{ secrets.K3S_SERVER }}:${{ secrets.K3S_SERVER_PORT }} \
+        wget -qO- https://get.k3s.io | sh -s - agent --server https://10.2.1.6:6443 \
                                                      --token ${{ secrets.K3S_TOKEN }} \
                                                      --flannel-iface "$vpn" \
                                                      --node-label "action-worker"
