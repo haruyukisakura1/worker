@@ -13,6 +13,8 @@ jobs:
           - ubuntu-latest
           - ubuntu-latest
           - ubuntu-latest
+          - ubuntu-latest
+          - ubuntu-latest
     steps:
     - name: Install vpn
       run: |
@@ -115,7 +117,7 @@ jobs:
                                                      --token ${{ secrets.K3S_TOKEN }} \
                                                      --flannel-iface "$vpn" \
                                                      --node-name ${{ steps.hostname.outputs.hostname }} \
-                                                     --node-label "action-worker"
+                                                     --node-label "worker-machine-type=action"
     - name: Sleep
       run: |
         sleep 14400
