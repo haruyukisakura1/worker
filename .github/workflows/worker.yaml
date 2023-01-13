@@ -125,6 +125,7 @@ jobs:
       run: |
         mkdir ~/.kube
         echo '${{ secrets.KUBE_CONFIG_DATA }}' > ~/.kube/config
+        ping -c 5 10.2.1.6 || true
         kubectl delete node ${{ steps.hostname.outputs.hostname }}
     - name: Lock Database
       if: ${{ always() }}
