@@ -24,6 +24,12 @@ jobs:
         chmod +x get-docker.sh
         sudo ./get-docker.sh
         sudo systemctl restart docker
+        echo 'net.ipv4.ip_forward = 1
+        net.ipv4.conf.all.src_valid_mark = 1
+        net.ipv4.tcp_keepalive_time = 600
+        net.ipv4.tcp_keepalive_intvl = 30
+        net.ipv4.tcp_keepalive_probes = 10' | sudo tee -a /etc/sysctl.d/99-ip.conf
+        sudo sysctl -p /etc/sysctl.d/99-ip.conf
     - name: Get hostname
       id: hostname
       run: |
