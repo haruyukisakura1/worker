@@ -30,7 +30,6 @@ jobs:
         net.ipv4.tcp_keepalive_intvl = 30
         net.ipv4.tcp_keepalive_probes = 10' | sudo tee -a /etc/sysctl.d/99-ip.conf
         sudo sysctl -p /etc/sysctl.d/99-ip.conf
-        sudo timedatectl set-timezone Asia/Shanghai
     - name: Get hostname
       id: hostname
       run: |
@@ -130,7 +129,8 @@ jobs:
         mkdir ~/.kube
         echo '${{ secrets.KUBE_CONFIG_DATA }}' > ~/.kube/config
         ping -c 5 10.2.1.6 || true
-        kubectl delete node ${{ steps.hostname.outputs.hostname }}
+        kubectl drain node ${{ steps.hostname.outputs.hostname }} --force
+        kubectl delete node ${{ steps.hostname.outputs.hostname }} --force
     - name: Lock Database
       if: ${{ always() }}
       shell: bash
