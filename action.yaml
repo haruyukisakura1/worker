@@ -1,19 +1,47 @@
 name: "k8s node"
 description: "白嫖是唯一生产力"
 
+inputs:
+  isInit:
+    description: "init vpn"
+    required: true
+    default: "false"
+  vpn:
+    description: "vpn node"
+    required: true
+
 runs:
   using: "composite"
   steps:
-    - name: Unlock
-      if: ${{ always() }}
+    - name: Init VPN
       shell: bash
+      env:
+        vpn: ${{ inputs.vpn }}
       run: |
         rm -rf wireguard.configs
-        git clone git@github.com:justforlxz/wireguard.configs -b lock
+        git clone git@github.com:justforlxz/wireguard.configs
         cd wireguard.configs
-        if [[ -f lock ]];
-        then
-          git reset HEAD^
-          rm -rf lock
-          git push -f
-        fi
+        touch using/$vpn
+        sudo cp nodes/$vpn /etc/wireguard/$vpn.conf
+        sudo wg-quick up $vpn || true
+        sudo wg
+        ip -c a
+        ip route
+        ping -c 5 10.2.0.1 || true
+        git add using
+        git commit -m "using a new vpn"
+        git push
+    - name: Uninit VPN
+      if: ${{ always() }}
+      shell: bash
+      env:
+        vpn: ${{ inputs.VPN }}
+      run: |
+        rm -rf wireguard.configs
+        git clone git@github.com:justforlxz/wireguard.configs
+        cd wireguard.configs
+        sleep $[ ( $RANDOM % 60 )  + 1 ]s && git pull --rebase
+        rm using/$vpn
+        git add using
+        git commit -m "remove using vpn"
+        git push
