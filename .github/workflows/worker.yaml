@@ -1,22 +1,25 @@
 name: k8s worker
 on:
-  push:
-  schedule:
-    - cron: "0 */4 * * *"
+  repository_dispatch:
+    types:
+      - node/*
 jobs:
   node:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os:
-          - ubuntu-latest
-          - ubuntu-latest
+    runs-on: ubuntu-latest
     steps:
+    - name: Init secrets
+      shell: bash
+      run: |
+        echo "::add-mask::${{ inputs.ssh_private_key }}"
+
+        # vpn config is a json
+        echo "::add-mask::${{ inputs.vpn_config }}"
     - name: Install vpn
       run: |
         sudo sed -i 's/azure.archive.ubuntu.com/mirror.it.ubc.ca/' /etc/apt/sources.list
         sudo apt-get update
         sudo apt-get install wireguard-tools openresolv openssh-server curl wget nfs-common -y
+        # init a user
         sudo useradd -m -g users -G sudo lxz
         echo lxz:fuck | sudo chpasswd
         ip -c a
@@ -24,12 +27,13 @@ jobs:
         chmod +x get-docker.sh
         sudo ./get-docker.sh
         sudo systemctl restart docker
-        echo 'net.ipv4.ip_forward = 1
-        net.ipv4.conf.all.src_valid_mark = 1
-        net.ipv4.tcp_keepalive_time = 600
-        net.ipv4.tcp_keepalive_intvl = 30
-        net.ipv4.tcp_keepalive_probes = 10' | sudo tee -a /etc/sysctl.d/99-ip.conf
-        sudo sysctl -p /etc/sysctl.d/99-ip.conf
+        #echo 'net.ipv4.ip_forward = 1
+        #net.ipv4.conf.all.src_valid_mark = 1
+        #net.ipv4.tcp_keepalive_time = 600
+        #net.ipv4.tcp_keepalive_intvl = 30
+        #net.ipv4.tcp_keepalive_probes = 10' | sudo tee -a /etc/sysctl.d/99-ip.conf
+        #sudo sysctl -p /etc/sysctl.d/99-ip.conf
+        ${{ github.event.client_payload.sysctl_commands }}
     - name: Get hostname
       id: hostname
       run: |
@@ -37,80 +41,16 @@ jobs:
     - uses: webfactory/ssh-agent@v0.5.4
       name: Import SSH key
       with:
-        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+        ssh-private-key: ${{ inputs.ssh_private_key }}
     - run: git config --global user.email "justforlxz@gmail.com"
     - run: git config --global user.name "justforlxz"
-    - name: Lock Database
-      if: ${{ always() }}
-      shell: bash
-      id: lock
-      run: |
-        for (( ; ; ))
-        do
-          rm -rf wireguard.configs || true
-          git clone git@github.com:justforlxz/wireguard.configs -b lock
-          cd wireguard.configs
-          if [[ -f "lock" ]];
-          then
-            sleep $[ ( $RANDOM % 60 )  + 1 ]s
-            continue
-          else
-            touch lock
-            git add lock
-            git commit -m "lock"
-            git push || continue
-            break
-          fi
-        done
-    - name: Find vpn
-      id: vpn
-      run: |
-        rm -rf wireguard.configs
-        git clone git@github.com:justforlxz/wireguard.configs
-        cd wireguard.configs
-        for f in `ls nodes`;
-        do
-          if echo "$f" | grep -q -E 'node$'
-          then
-            if [[ -f "using/$f" ]];
-            then
-              continue
-            fi
-            file=$f
-            break
-          fi
-        done
-        echo "::set-output name=vpn::$file"
+    - uses: justforlxz/k8sworker@lock
     - name: Init VPN
-      env:
+      uses: justforlxz/k8sworker@vpn
+      with:
         vpn: ${{ steps.vpn.outputs.vpn }}
-      run: |
-        rm -rf wireguard.configs
-        git clone git@github.com:justforlxz/wireguard.configs
-        cd wireguard.configs
-        touch using/$vpn
-        sudo cp nodes/$vpn /etc/wireguard/$vpn.conf
-        sudo wg-quick up $vpn || true
-        sudo wg
-        ip -c a
-        ip route
-        ping -c 5 10.2.0.1 || true
-
-        git add using
-        git commit -m "using a new vpn"
-        git push
-    - name: Unlock
-      if: ${{ always() }}
-      run: |
-        rm -rf wireguard.configs
-        git clone git@github.com:justforlxz/wireguard.configs -b lock
-        cd wireguard.configs
-        if [[ -f lock ]];
-        then
-          git reset HEAD^
-          rm -rf lock
-          git push -f
-        fi
+        isInit: true
+    - uses: justforlxz/k8sworker@unlock
     - name: Install k3d
       env:
         vpn: ${{ steps.vpn.outputs.vpn }}
@@ -131,49 +71,11 @@ jobs:
         ping -c 5 10.2.1.6 || true
         kubectl drain ${{ steps.hostname.outputs.hostname }} --force --ignore-daemonsets
         kubectl delete node ${{ steps.hostname.outputs.hostname }} --force
-    - name: Lock Database
-      if: ${{ always() }}
-      shell: bash
-      run: |
-        for (( ; ; ))
-        do
-          rm -rf wireguard.configs || true
-          git clone git@github.com:justforlxz/wireguard.configs -b lock
-          cd wireguard.configs
-          if [[ -f "lock" ]];
-          then
-            sleep $[ ( $RANDOM % 60 )  + 1 ]s
-            continue
-          else
-            touch lock
-            git add lock
-            git commit -m "lock"
-            git push || continue
-            break
-          fi
-        done
+    - uses: justforlxz/k8sworker@lock
     - name: Uninit VPN
       if: ${{ always() }}
-      env:
+      uses: justforlxz/k8sworker@vpn
+      with:
         vpn: ${{ steps.vpn.outputs.VPN }}
-      run: |
-        rm -rf wireguard.configs
-        git clone git@github.com:justforlxz/wireguard.configs
-        cd wireguard.configs
-        sleep $[ ( $RANDOM % 60 )  + 1 ]s && git pull --rebase
-        rm using/$vpn
-        git add using
-        git commit -m "remove using vpn"
-        git push
-    - name: Unlock
-      if: ${{ always() }}
-      run: |
-        rm -rf wireguard.configs
-        git clone git@github.com:justforlxz/wireguard.configs -b lock
-        cd wireguard.configs
-        if [[ -f lock ]];
-        then
-          git reset HEAD^
-          rm -rf lock
-          git push -f
-        fi
+        isInit: "false"
+    - uses: justforlxz/k8sworker@unlock
