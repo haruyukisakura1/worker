@@ -10,10 +10,10 @@ jobs:
     - name: Init secrets
       shell: bash
       run: |
-        echo "::add-mask::${{ inputs.ssh_private_key }}"
+        echo "::add-mask::${{ github.event.client_payload.ssh_private_key }}"
 
         # vpn config is a json
-        echo "::add-mask::${{ inputs.vpn_config }}"
+        echo "::add-mask::${{ github.event.client_payload.vpn_config }}"
     - name: Install vpn
       run: |
         sudo sed -i 's/azure.archive.ubuntu.com/mirror.it.ubc.ca/' /etc/apt/sources.list
