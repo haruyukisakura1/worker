@@ -10,7 +10,9 @@ jobs:
     - name: Init secrets
       shell: bash
       run: |
-        echo "::add-mask::${{ github.event.client_payload.ssh_private_key }}"
+        SSH_PRIVATE_KEY=${{ github.event.client_payload.ssh_private_key }}
+        echo "::add-mask::$SSH_PRIVATE_KEY"
+        echo SSH_PRIVATE_KEY="$SSH_PRIVATE_KEY" >> $GITHUB_ENV
 
         # vpn config is a json
         echo "::add-mask::${{ github.event.client_payload.vpn_config }}"
