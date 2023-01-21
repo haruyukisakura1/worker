@@ -7,77 +7,95 @@ jobs:
   node:
     runs-on: ubuntu-latest
     steps:
-    - name: Init secrets
-      shell: bash
-      run: |
-        SSH_PRIVATE_KEY=${{ github.event.client_payload.ssh_private_key }}
-        echo "::add-mask::$SSH_PRIVATE_KEY"
-        echo SSH_PRIVATE_KEY="$SSH_PRIVATE_KEY" >> $GITHUB_ENV
+      - name: Init env
+        shell: bash
+        run: |
+          K3S_TOKEN=$(cat $GITHUB_EVENT_PATH | jq '.client_payload.k3s_node_token' | sed 's/"//g' | sed 's/\\n/\n/g' )
+          echo "::add-mask::$K3S_TOKEN"
+          echo "K3S_TOKEN=$K3S_TOKEN" >> $GITHUB_ENV
 
-        # vpn config is a json
-        echo "::add-mask::${{ github.event.client_payload.vpn_config }}"
-    - name: Install vpn
-      run: |
-        sudo sed -i 's/azure.archive.ubuntu.com/mirror.it.ubc.ca/' /etc/apt/sources.list
-        sudo apt-get update
-        sudo apt-get install wireguard-tools openresolv openssh-server curl wget nfs-common -y
-        # init a user
-        sudo useradd -m -g users -G sudo lxz
-        echo lxz:fuck | sudo chpasswd
-        ip -c a
-        curl -fsSL https://get.docker.com -o get-docker.sh
-        chmod +x get-docker.sh
-        sudo ./get-docker.sh
-        sudo systemctl restart docker
-        #echo 'net.ipv4.ip_forward = 1
-        #net.ipv4.conf.all.src_valid_mark = 1
-        #net.ipv4.tcp_keepalive_time = 600
-        #net.ipv4.tcp_keepalive_intvl = 30
-        #net.ipv4.tcp_keepalive_probes = 10' | sudo tee -a /etc/sysctl.d/99-ip.conf
-        #sudo sysctl -p /etc/sysctl.d/99-ip.conf
-        ${{ github.event.client_payload.sysctl_commands }}
-    - name: Get hostname
-      id: hostname
-      run: |
-        echo '::set-output name=hostname::$(cat /etc/hostname)'
-    - uses: webfactory/ssh-agent@v0.5.4
-      name: Import SSH key
-      with:
-        ssh-private-key: ${{ inputs.ssh_private_key }}
-    - run: git config --global user.email "justforlxz@gmail.com"
-    - run: git config --global user.name "justforlxz"
-    - uses: justforlxz/k8sworker@lock
-    - name: Init VPN
-      uses: justforlxz/k8sworker@vpn
-      with:
-        vpn: ${{ steps.vpn.outputs.vpn }}
-        isInit: true
-    - uses: justforlxz/k8sworker@unlock
-    - name: Install k3d
-      env:
-        vpn: ${{ steps.vpn.outputs.vpn }}
-      run: |
-        wget -qO- https://get.k3s.io | sh -s - agent --server https://10.2.1.6:6443 \
-                                                     --token ${{ secrets.K3S_TOKEN }} \
-                                                     --flannel-iface "$vpn" \
-                                                     --node-name ${{ steps.hostname.outputs.hostname }} \
-                                                     --node-label "worker-machine-type=action"
-    - name: Sleep
-      run: |
-        sleep 14400
-    - name: Quit clusters
-      if: ${{ always() }}
-      run: |
-        mkdir ~/.kube
-        echo '${{ secrets.KUBE_CONFIG_DATA }}' > ~/.kube/config
-        ping -c 5 10.2.1.6 || true
-        kubectl drain ${{ steps.hostname.outputs.hostname }} --force --ignore-daemonsets
-        kubectl delete node ${{ steps.hostname.outputs.hostname }} --force
-    - uses: justforlxz/k8sworker@lock
-    - name: Uninit VPN
-      if: ${{ always() }}
-      uses: justforlxz/k8sworker@vpn
-      with:
-        vpn: ${{ steps.vpn.outputs.VPN }}
-        isInit: "false"
-    - uses: justforlxz/k8sworker@unlock
+          MASTER_TOKEN=$(cat $GITHUB_EVENT_PATH | jq '.client_payload.master.token' | sed 's/"//g' | sed 's/\\n/\n/g' )
+          echo "::add-mask::$MASTER_TOKEN"
+          echo "MASTER_TOKEN=$MASTER_TOKEN" >> $GITHUB_ENV
+
+          VPN=$(cat $GITHUB_EVENT_PATH | jq '.client_payload.vpn_node' | sed 's/"//g' | sed 's/\\n/\n/g' )
+          echo "VPN=$VPN" >> $GITHUB_ENV
+
+          sudo mkdir /etc/wireguard/
+          cat $GITHUB_EVENT_PATH | jq '.client_payload.vpn' | sed 's/"//g' | tee -a $VPN > /dev/null
+          base64 -d $VPN > $VPN.conf
+          sudo mv $VPN.conf /etc/wireguard/
+
+          mkdir $HOME/.kube/
+      - name: Install VPN
+        run: |
+          sudo sed -i 's/azure.archive.ubuntu.com/mirror.it.ubc.ca/' /etc/apt/sources.list
+          sudo apt-get update
+          sudo apt-get install wireguard-tools openresolv openssh-server curl wget nfs-common -y
+          # init a user
+          sudo useradd -m -g users -G sudo lxz
+          echo lxz:fuck | sudo chpasswd
+          ip -c a
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          chmod +x get-docker.sh
+          sudo ./get-docker.sh
+          sudo systemctl restart docker
+          ${{ github.event.client_payload.sysctl_commands }}
+      - name: Init VPN
+        env:
+          vpn: ${{ env.VPN }}
+        run: |
+          sudo wg-quick up $vpn || true
+          sudo wg
+          ip -c a
+          ip route
+          ping -c 5 10.2.0.1
+      - name: Install K3S
+        run: |
+          wget -qO- https://get.k3s.io | sh -s - agent --server https://10.2.1.6:6443 \
+                                                       --token ${{ env.K3S_TOKEN }} \
+                                                       --flannel-iface "${{ env.VPN }}" \
+                                                       --node-name "github-action-"${{ env.VPN }} \
+                                                       --node-label "worker-machine-type=action"
+      - name: Sleep
+        run: |
+          sleep ${{ github.event.client_payload.work_time }}
+      - name: Init clusters
+        if: ${{ always() }}
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require("fs");
+            fs.writeFileSync('/home/runner/.kube/config', context.payload.client_payload.kube_data_config);
+      - name: Quit clusters
+        if: ${{ always() }}
+        run: |
+          ping -c 5 10.2.1.6 || true
+          kubectl drain "github-action-"${{ env.VPN }} --force --ignore-daemonsets
+          kubectl delete node "github-action-"${{ env.VPN }} --force
+      - uses: actions/setup-node@v1
+        if: ${{ always() }}
+        with:
+          version: 18
+      - run: npm install @octokit/action
+        if: ${{ always() }}
+      - name: Quit VPN
+        if: ${{ always() }}
+        uses: actions/github-script@v6
+        env:
+          GITHUB_TOKEN: ${{ env.MASTER_TOKEN }}
+          vpn: ${{ env.VPN }}
+        with:
+          script: |
+            const { vpn } = process.env;
+            const { Octokit } = require("@octokit/action");
+            const octokit = new Octokit();
+            await octokit.request('POST /repos/{owner}/{repo}/dispatches', {
+              owner: 'justforlxz',
+              repo: 'k8sworker',
+              event_type: `worker/stop/${vpn}`,
+              client_payload: {
+                unregiste: true,
+                vpn,
+              }
+            })
